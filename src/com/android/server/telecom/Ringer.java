@@ -16,6 +16,9 @@
 
 package com.android.server.telecom;
 
+import android.content.pm.PackageManager;
+import android.hardware.camera2.CameraManager;
+import android.os.AsyncTask;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.Person;
@@ -29,6 +32,8 @@ import android.media.Ringtone;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Vibrator;
+import android.os.UserHandle;
+import android.provider.Settings;
 
 import com.android.internal.annotations.VisibleForTesting;
 
@@ -90,6 +95,8 @@ public class Ringer {
     private final Vibrator mVibrator;
     private final InCallController mInCallController;
 
+    private TorchToggler torchToggler;
+
     private InCallTonePlayer mCallWaitingPlayer;
     private RingtoneFactory mRingtoneFactory;
 
@@ -105,6 +112,8 @@ public class Ringer {
      * Used to track the status of {@link #mVibrator} in the case of simultaneous incoming calls.
      */
     private boolean mIsVibrating = false;
+
+    private int torchMode;
 
     /** Initializes the Ringer. */
     @VisibleForTesting
@@ -126,6 +135,8 @@ public class Ringer {
         mRingtonePlayer = asyncRingtonePlayer;
         mRingtoneFactory = ringtoneFactory;
         mInCallController = inCallController;
+
+        torchToggler = new TorchToggler(context);
 
         if (mContext.getResources().getBoolean(R.bool.use_simple_vibration_pattern)) {
             mDefaultVibrationEffect = VibrationEffect.createWaveform(SIMPLE_VIBRATION_PATTERN,
@@ -194,6 +205,17 @@ public class Ringer {
             effect = mDefaultVibrationEffect;
         }
 
+        boolean dndMode = !isRingerAudible;
+        torchMode = Settings.System.getIntForUser(mContext.getContentResolver(),
+                 Settings.System.FLASHLIGHT_ON_CALL, 0, UserHandle.USER_CURRENT);
+
+        boolean shouldFlash = (torchMode == 1 && !dndMode) ||
+                              (torchMode == 2 && dndMode)  ||
+                               torchMode == 3;
+        if (shouldFlash) {
+            blinkFlashlight();
+        }
+
         if (shouldVibrate(mContext, foregroundCall) && !mIsVibrating && shouldRingForContact) {
             mVibrator.vibrate(effect, VIBRATION_ATTRIBUTES);
             mIsVibrating = true;
@@ -216,6 +238,11 @@ public class Ringer {
             effect = mDefaultVibrationEffect;
         }
         return effect;
+    }
+
+    private void blinkFlashlight() {
+        torchToggler = new TorchToggler(mContext);
+        torchToggler.execute();
     }
 
     public void startCallWaiting(Call call) {
@@ -253,6 +280,7 @@ public class Ringer {
         }
 
         mRingtonePlayer.stop();
+        torchToggler.stop();
 
         if (mIsVibrating) {
             Log.addEvent(mVibratingCall, LogUtils.Events.STOP_VIBRATOR);
@@ -328,5 +356,47 @@ public class Ringer {
             return false;
         }
         return mSystemSettingsUtil.canVibrateWhenRinging(context);
+    }
+
+    private class TorchToggler extends AsyncTask {
+
+        private boolean shouldStop = false;
+        private CameraManager cameraManager;
+        private int duration = 500;
+        private boolean hasFlash = true;
+        private Context context;
+
+        public TorchToggler(Context ctx) {
+            this.context = ctx;
+            init();
+        }
+
+        private void init() {
+            cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
+            hasFlash = context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_FLASH);
+        }
+
+        void stop() {
+            shouldStop = true;
+        }
+
+        @Override
+        protected Object doInBackground(Object[] objects) {
+            if (hasFlash) {
+                try {
+                    String cameraId = cameraManager.getCameraIdList()[0];
+                    while (!shouldStop) {
+                        cameraManager.setTorchMode(cameraId, true);
+                        Thread.sleep(duration);
+
+                        cameraManager.setTorchMode(cameraId, false);
+                        Thread.sleep(duration);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+            return null;
+        }
     }
 }
