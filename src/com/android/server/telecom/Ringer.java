@@ -30,11 +30,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Vibrator;
 
-import android.os.UserHandle;
-import android.provider.Settings;
-
 import com.android.internal.annotations.VisibleForTesting;
-import com.android.internal.util.custom.CustomUtils;
 
 import java.util.ArrayList;
 
@@ -109,8 +105,6 @@ public class Ringer {
      * Used to track the status of {@link #mVibrator} in the case of simultaneous incoming calls.
      */
     private boolean mIsVibrating = false;
-
-    private boolean mIsFlash = false;
 
     /** Initializes the Ringer. */
     @VisibleForTesting
@@ -203,14 +197,8 @@ public class Ringer {
         if (shouldVibrate(mContext, foregroundCall) && !mIsVibrating && shouldRingForContact) {
             mVibrator.vibrate(effect, VIBRATION_ATTRIBUTES);
             mIsVibrating = true;
-
         } else if (mIsVibrating) {
             Log.addEvent(foregroundCall, LogUtils.Events.SKIP_VIBRATION, "already vibrating");
-        }
-
-        if (!mIsFlash && Settings.System.getIntForUser(mContext.getContentResolver(),  Settings.System.FLASH_ON_CALL_WAITING, 0, UserHandle.USER_CURRENT) == 1) {
-            CustomUtils.toggleCameraFlashOn();
-            mIsFlash = true;
         }
 
         return shouldAcquireAudioFocus;
@@ -271,11 +259,6 @@ public class Ringer {
             mVibrator.cancel();
             mIsVibrating = false;
             mVibratingCall = null;
-
-        }
-        if (mIsFlash && Settings.System.getIntForUser(mContext.getContentResolver(), Settings.System.FLASH_ON_CALL_WAITING, 0, UserHandle.USER_CURRENT) == 1) {
-            CustomUtils.toggleCameraFlashOff();
-            mIsFlash = false;
         }
     }
 
